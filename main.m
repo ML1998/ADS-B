@@ -18,6 +18,8 @@ s = serialport(str, 9600, "Timeout", 5);
 
 %% Input current location info and map init
 
+clc; clear all; close all;
+
 %Get center location
 location.lat = input('Enter current latitude in degrees (neg for southern hemisphere) \n (example: 39.92 for Beijing): ');
 location.long = input('Enter current longitude in degrees (neg for western hemisphere) \n (example: 116.38 for Beijing): ');
@@ -40,7 +42,8 @@ location.a3 = floor(location.long/location.dlong_even);
 location.dlong_odd = 360/(NL0-1);
 location.a4 = floor(location.long/location.dlong_odd);
 
-%Map display
+%% Map display
+
 wm = webmap('Open Street Map');
 zoomLevel = 8;
 wmcenter(wm, location.lat, location.long, zoomLevel)
@@ -53,17 +56,19 @@ h = wmmarker(location.lat, location.long, ...
                     'FeatureName', 'Beijing',... 
                     'OverlayName', 'Beijing');
                     %'IconScale',0.1);
-                
-%% Get data from serial port
+                    
+%% Data processing
 clc;
-%flush after N cycles
-N = 4;
 adder = 0;
 ICAOList = strings(0);
 MsgList = [];
-handles = {};
+Handles = {};
 p = geopoint();
 
+t = readtable('TEST_multi_my.txt');
+tt = t.message;
+N = size(t,1);
+    
 for i = 1:1:N
     %read 112 bits data from serial port
     % msg = read(s, 28, "char"); % 8bits * 14 = 112 bits
@@ -72,15 +77,17 @@ for i = 1:1:N
     %  1. For simulation purposes: change to read from a txt file 
     %  2. Methods of Dealing with serial port 
         
-    if(i==1)
-        msg = '8D4840D6202CC371C32CE0576098'; %ID
-    elseif(i==2)
-        msg = '8D40621D58C382D690C8AC2863A7'; %pos
-    elseif(i==3)
-        msg = '8D40621D994409940838175B284F'; %ground speed
-    elseif(i==4)
-        msg = '8D40621D202CC371C32CE0576098'; %ID
-    end
+%     if(i==1)
+%         msg = '8D4840D6202CC371C32CE0576098'; %ID
+%     elseif(i==2)
+%         msg = '8D40621D58C382D690C8AC2863A7'; %pos
+%     elseif(i==3)
+%         msg = '8D40621D994409940838175B284F'; %ground speed
+%     elseif(i==4)
+%         msg = '8D40621D202CC371C32CE0576098'; %ID
+%     end
+
+    msg = tt{i};
     
     msg_bin = adsb_str2bin(msg);% convert to binary
     
@@ -91,7 +98,8 @@ for i = 1:1:N
         disp('Warning: illegal message'); 
         continue; % go to next iteration
     else
-        disp('Info:  message got');
+        %disp('Info:  message got');
+        %disp(msg);
     end
     
     % Step 2: Record 24-bit ICAO and create struct
@@ -110,7 +118,7 @@ for i = 1:1:N
     field11 = 'Vr_Dir';         value11 = missing;
 
     msg_s = struct(field1,value1,field2,value2,field3,value3,field4,value4,...
-        field5,value5,field6,value6,field7,value7,field8,value8,field9,value9,field10,value10);
+        field5,value5,field6,value6,field7,value7,field8,value8,field9,value9,field10,value10,field11,value11);
         
     
     % Step 3: Identify message type
@@ -146,7 +154,7 @@ for i = 1:1:N
     
     %Step 4: Add the new Aircraft info / Refresh the current info
     [lia, loc] = ismember(string(msg_ICAO), ICAOList);
-    
+    [NHrow, NHcol] = size(Handles);
     if(lia) 
         %Refresh the current info if it is a member
         % This is not the first time we receive messages from this aircraft
@@ -172,35 +180,51 @@ for i = 1:1:N
                 MsgList(loc).Alt = msg_s.Alt;
                 MsgList(loc).Latitude  = msg_s.Latitude;
                 MsgList(loc).Longitude = msg_s.Longitude;    
+                %fprintf('Info: ICAO: %s, ALT: %d, Lat: %s, Long: %s\n', msg_ICAO, msg_s.Alt, msg_s.Latitude, msg_s.Longitude);    
                 
                 %Update/Add the info in the geopoint structure
                 if(~isempty(p))
                     [glia, gloc] = ismember(string(msg_ICAO), p.ICAO);
                     if(glia)    % Condition 2
                         % 2.1 update the parameter info in p
+                        lat_rsv = p.Latitude(gloc);
+                        lon_rsv = p.Longitude(gloc);
                         p.Latitude(gloc)  = msg_s.Latitude;
                         p.Longitude(gloc) = msg_s.Longitude;
                         p.Alt(gloc)       = msg_s.Alt;
                         % 2.2 delete the geopoint currently on the map
-                        [hlia, hloc] = ismember(string(Handles(2,:)), msg_ICAO);
+                        [hlia, hloc] = ismember([Handles{2,:}], msg_ICAO);
                         idx = find(hloc,1);
-                        wmremove(Handles{idx,1});
+                        wmmarker(lat_rsv, lon_rsv,  'Icon', 'trace-mark.png',...
+                                                    'IconScale', 0.5); % reserve the trace
+                        wmremove(Handles{1,idx});
+                        
                         % 2.3 insert a new point on map, update the handler in Handles
-                        Handles{idx,1} = wmmarker(p(gloc), 'Icon',iconFilename,...
+                        Handles{1,idx} = wmmarker(p(gloc), 'Icon',iconFilename,...
                                                            'FeatureName', msg_ICAO,... 
                                                            'OverlayName', msg_ICAO);
                         
                     else        % Condition 3.1
                         %3.1.1 add it to geopoint set p
                         p_tmp = geopoint(MsgList(loc));
-                        p(length(p)+1) = p_tmp;
+                        p = cat(1, p, p_tmp);
                         %3.1.2 display it on map and store the handle
                         h = wmmarker(p_tmp, 'Icon',iconFilename,...
                                             'FeatureName', msg_ICAO,... 
                                             'OverlayName', msg_ICAO);
-                        Handles{1,length(Handles)+1} = h;
-                        Handles{2,length(Handles)+1} = string(msg_ICAO);   
+                        Handles{1,NHcol+1} = h;
+                        Handles{2,NHcol+1} = string(msg_ICAO);   
                     end
+                else %p is empty, it must not be a member of p
+                     %3.1.1 add it to geopoint set p
+                     p = geopoint(MsgList(loc));
+                     %3.1.2 display it on map and store the handle
+                     h = wmmarker(p,    'Icon',iconFilename,...
+                                        'FeatureName', msg_ICAO,... 
+                                        'OverlayName', msg_ICAO);
+                     % store the handle
+                     Handles{1,1} = h;
+                     Handles{2,1} = string(msg_ICAO);
                 end
                 
             case 'FLAG_ID' 
@@ -213,11 +237,11 @@ for i = 1:1:N
                         % 2.1 update the parameter info in p
                         p.ID(gloc)  = msg_s.ID;
                         % 2.2 delete the geopoint currently on the map
-                        [hlia, hloc] = ismember(string(Handles(2,:)), msg_ICAO);
+                        [hlia, hloc] = ismember([Handles{2,:}], msg_ICAO);
                         idx = find(hloc,1);
-                        wmremove(Handles{idx,1});
+                        wmremove(Handles{1,idx});
                         % 2.3 insert a new point on map, update the handler in Handles
-                        Handles{idx,1} = wmmarker(p(gloc), 'Icon',iconFilename,...
+                        Handles{1,idx} = wmmarker(p(gloc), 'Icon',iconFilename,...
                                                            'FeatureName', msg_ICAO,... 
                                                            'OverlayName', msg_ICAO);
                     end
@@ -243,11 +267,11 @@ for i = 1:1:N
                         p.Vr_Rate_unit(gloc) = msg_s.Vr_Rate_unit;
                         p.Vr_Dir(gloc)       = msg_s.Vr_Dir;
                         % 2.2 delete the geopoint currently on the map
-                        [hlia, hloc] = ismember(string(Handles(2,:)), msg_ICAO);
+                        [hlia, hloc] = ismember([Handles{2,:}], msg_ICAO);
                         idx = find(hloc,1);
-                        wmremove(Handles{idx,1});
+                        wmremove(Handles{1,idx});
                         % 2.3 insert a new point on map, update the handler in Handles
-                        Handles{idx,1} = wmmarker(p(gloc), 'Icon',iconFilename,...
+                        Handles{1,idx} = wmmarker(p(gloc), 'Icon',iconFilename,...
                                                            'FeatureName', msg_ICAO,... 
                                                            'OverlayName', msg_ICAO);
                     end
@@ -273,20 +297,21 @@ for i = 1:1:N
                 Handles{2,1} = string(msg_ICAO);
             else
                 p_tmp = geopoint(msg_s);
-                p(length(p)+1) = p_tmp;
+                p = cat(1, p, p_tmp);
                 h = wmmarker(p_tmp, 'Icon',iconFilename,...
                                     'FeatureName', msg_ICAO,... 
                                     'OverlayName', msg_ICAO);
                 % store the handle
-                Handles{1,length(Handles)+1} = h;
-                Handles{2,length(Handles)+1} = string(msg_ICAO);     
+                Handles{1,NHcol+1} = h;
+                Handles{2,NHcol+1} = string(msg_ICAO);     
             end
         end
     end
     
     %Step 5: Update all received info
     T = struct2table(MsgList);
-    disp(T);
+    %disp(T);
+    %disp(Handles);
     writetable(T,'AdsBData.txt','Delimiter',' ')  
     
     %Step 6: Display all geopoints on webmap
@@ -294,7 +319,10 @@ for i = 1:1:N
 
 end
 
+%wmclose;
+
 %% Free the serial port
-wmclose;
+
 flush(s);
 clear s;
+
