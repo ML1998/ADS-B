@@ -4,7 +4,7 @@
 %       Spring 2020
 
 function [Vel_hz,Vel_hz_unit,Deg_hz,Rate_vr,Rate_vr_unit,Direc_vr] = msg_vel_decode(data)
-% MSG_VEL_DECODE 
+% Decode airplane ground speed info
 
 subtype = data(6:8);
 
@@ -19,7 +19,7 @@ if(subtype == '001')    %subtype 1: ground speed
     Sig_vr = data(37);                  %Vertical rate sign
     Rate_vr = bin2dec(data(38:46));     %Vertical rate
 
-    %Horizontal Velocity calculation
+    % ---------- Horizontal Velocity calculation -----------------
     if(Sig_ew == '1')
         Vel_we = -1*(Vel_ew - 1);
     else
@@ -39,7 +39,7 @@ if(subtype == '001')    %subtype 1: ground speed
     Vel_hz = Vel_hz * 1.852; %kt to km/h
     Vel_hz_unit = 'km/h';
     
-    %Vertical Rate calculation
+    % ------------- Vertical Velocity calculation ---------------
     if(Sig_vr == '0')
         Direc_vr = 'UP';
     else
